@@ -137,12 +137,12 @@ fn setup(
 fn propagate_particle(mut query: Query<(&mut Transform, &SignalParticle)>, time: Res<Time>) {
     for (mut particle_transforms, signal_particle) in query.iter_mut() {
         let t = time.elapsed().as_millis() as f32 / 1000.;
-        particle_transforms.translation.x += signal_particle.speed * time.delta_seconds();
 
-        let a = signal_particle.amplitude;
+        let a = -signal_particle.amplitude;
         let k = 2. * PI * signal_particle.frequency / signal_particle.speed; // v = \omega/k =
                                                                              // \lambda/T = \lambda * f
         let x = particle_transforms.translation.x;
+        particle_transforms.translation.x += signal_particle.speed * time.delta_seconds();
 
         // Classic
         // propagating wave equation
