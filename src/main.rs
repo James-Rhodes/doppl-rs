@@ -1,18 +1,39 @@
 use std::{f32::consts::PI, time::Duration};
 
-use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
+use bevy::{prelude::*, sprite::MaterialMesh2dBundle, window::RawHandleWrapper};
 
 // Colors
+const PARTICLE_AMPLITUDE: f32 = 50.;
 const PARTICLE_COLOR: Color = Color::GREEN;
-const PARTICLE_RADIUS: f32 = 10.;
+const PARTICLE_RADIUS: f32 = 5.;
 const PARTICLE_SIZE: Vec3 = Vec2::splat(PARTICLE_RADIUS).extend(1.0);
+const PARTICLE_SPEED: f32 = -100.;
+const PARTICLE_FREQUENCY: f32 = 0.5;
 
 const TRANSMITTER_COLOR: Color = Color::ORANGE;
 const TRANSMITTER_SIZE: f32 = 25.;
 
+const RECEIVER_COLOR: Color = Color::RED;
+const RECEIVER_WIDTH: f32 = 2. * PARTICLE_AMPLITUDE + 2. * PARTICLE_RADIUS;
+const RECEIVER_HEIGHT: f32 = 2. * RECEIVER_WIDTH;
+const RECEIVER_SIZE: Vec2 = Vec2::new(RECEIVER_HEIGHT, RECEIVER_WIDTH);
+const RECEIVER_TIME_SCALE: f32 = 1.0 / PARTICLE_FREQUENCY;
+const RECEIVER_DELTA_X_PER_SECOND: f32 = 2. * RECEIVER_WIDTH / RECEIVER_TIME_SCALE;
+const RECEIVER_PLOT_COLOR: Color = Color::BLACK;
+const RECEIVER_PLOT_RADIUS: f32 = 10.;
+const RECEIVER_PLOT_SIZE: Vec3 = Vec2::splat(RECEIVER_PLOT_RADIUS).extend(1.0);
+const RECEIVER_SPEED: f32 = 80.;
+
 const PARTICLE_SPAWN_RATE_MS: u64 = 50;
 
-// struct Receiver {}
+#[derive(Component, Default)]
+struct Receiver {
+    prev_collision_time: Option<f32>,
+    current_draw_position: f32,
+}
+
+#[derive(Component)]
+struct Mover;
 
 #[derive(Component, Default)]
 struct Transmitter {
@@ -33,7 +54,14 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (propagate_particle, produce_particle, destroy_particle).chain(),
+            (
+                propagate_particle,
+                produce_particle,
+                destroy_particle,
+                handle_rx_collision,
+                move_rx,
+            )
+                .chain(),
         )
         .run();
 }
@@ -45,6 +73,8 @@ fn setup(
 ) {
     commands.spawn(Camera2dBundle::default());
 
+    let transmitter_x = 400.;
+    let transmitter_y = 200.;
     let half_tri_size = TRANSMITTER_SIZE / 2.;
     let pta = Vec2::new(half_tri_size, half_tri_size);
     let ptb = Vec2::new(0., -half_tri_size);
@@ -60,7 +90,7 @@ fn setup(
         MaterialMesh2dBundle {
             mesh: meshes.add(Triangle2d::new(pta, ptb, ptc)).into(),
             material: materials.add(TRANSMITTER_COLOR),
-            transform: Transform::from_xyz(300., 200., 1.),
+            transform: Transform::from_xyz(transmitter_x, transmitter_y, 1.),
             ..default()
         },
     ));
@@ -76,9 +106,31 @@ fn setup(
         MaterialMesh2dBundle {
             mesh: meshes.add(Triangle2d::new(pta, ptb, ptc)).into(),
             material: materials.add(TRANSMITTER_COLOR),
-            transform: Transform::from_xyz(300., -200., 1.),
+            transform: Transform::from_xyz(transmitter_x, -transmitter_y, 1.),
             ..default()
         },
+    ));
+
+    let start_x = -300.;
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(Rectangle::from_size(RECEIVER_SIZE)).into(),
+            material: materials.add(RECEIVER_COLOR),
+            transform: Transform::from_xyz(start_x, transmitter_y, 1.),
+            ..default()
+        },
+        Receiver::default(),
+    ));
+
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(Rectangle::from_size(RECEIVER_SIZE)).into(),
+            material: materials.add(RECEIVER_COLOR),
+            transform: Transform::from_xyz(start_x, -transmitter_y, 1.),
+            ..default()
+        },
+        Receiver::default(),
+        Mover,
     ));
 }
 
@@ -120,9 +172,9 @@ fn produce_particle(
                         ..default()
                     },
                     SignalParticle {
-                        amplitude: 100.,
-                        speed: -100.,
-                        frequency: 1.,
+                        amplitude: PARTICLE_AMPLITUDE,
+                        speed: PARTICLE_SPEED,
+                        frequency: PARTICLE_FREQUENCY,
                     },
                 ))
                 .id();
@@ -132,13 +184,72 @@ fn produce_particle(
     }
 }
 
+fn handle_rx_collision(
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut commands: Commands,
+    sig_query: Query<(Entity, &GlobalTransform, &Transform), With<SignalParticle>>,
+    mut rx_query: Query<(Entity, &Transform, &mut Receiver)>,
+    time: Res<Time>,
+) {
+    for (sig_entity, sig_global_transform, sig_transform) in sig_query.iter() {
+        let particle_pos = sig_global_transform.translation().xy();
+        for (rx_entity, rx_transform, mut rx) in rx_query.iter_mut() {
+            let rx_translation = rx_transform.translation;
+            let rx_right_bound = rx_translation.x + RECEIVER_WIDTH;
+            let rx_top_bound = rx_translation.y + RECEIVER_HEIGHT / 2.;
+            let rx_bottom_bound = rx_translation.y - RECEIVER_HEIGHT / 2.;
+
+            if particle_pos.y < rx_top_bound
+                && particle_pos.y > rx_bottom_bound
+                && particle_pos.x < rx_right_bound
+            {
+                let t = time.elapsed().as_millis() as f32 / 1000.;
+                let y = sig_transform.translation.y;
+                commands.entity(sig_entity).despawn();
+
+                if rx.current_draw_position > 2. * RECEIVER_WIDTH {
+                    // If we have already plotted over the entire width of the receiver then just
+                    // don't do anything
+                    commands.entity(rx_entity).remove::<Mover>();
+                    continue;
+                }
+
+                let plot_point = commands
+                    .spawn(MaterialMesh2dBundle {
+                        mesh: meshes.add(Circle::default()).into(),
+                        material: materials.add(RECEIVER_PLOT_COLOR),
+                        transform: Transform::from_xyz(
+                            (RECEIVER_WIDTH) - rx.current_draw_position,
+                            y,
+                            2.,
+                        )
+                        .with_scale(RECEIVER_PLOT_SIZE),
+                        ..default()
+                    })
+                    .id();
+
+                commands.entity(rx_entity).add_child(plot_point);
+
+                if rx.prev_collision_time.is_none() {
+                    rx.prev_collision_time = Some(t);
+                }
+                rx.current_draw_position +=
+                    RECEIVER_DELTA_X_PER_SECOND * (t - rx.prev_collision_time.unwrap());
+
+                rx.prev_collision_time = Some(t);
+            }
+        }
+    }
+}
+
 fn destroy_particle(
     mut commands: Commands,
     camera: Query<(&Camera, &GlobalTransform)>,
-    query: Query<(Entity, &GlobalTransform, &SignalParticle)>,
+    sig_query: Query<(Entity, &GlobalTransform), With<SignalParticle>>,
 ) {
     let (camera, camera_transform) = camera.single();
-    for (entity, transform, _) in query.iter() {
+    for (entity, transform) in sig_query.iter() {
         let particle_pos = transform.translation();
 
         let world_left_bound = camera
@@ -150,5 +261,11 @@ fn destroy_particle(
         if particle_pos.x < world_left_bound - PARTICLE_RADIUS {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+fn move_rx(mut rx_query: Query<&mut Transform, (With<Receiver>, With<Mover>)>, time: Res<Time>) {
+    for mut transform in rx_query.iter_mut() {
+        transform.translation.x += RECEIVER_SPEED * time.delta_seconds();
     }
 }
