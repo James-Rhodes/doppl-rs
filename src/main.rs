@@ -1,14 +1,14 @@
 use std::{f32::consts::PI, time::Duration};
 
-use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
+use bevy::{prelude::*, sprite::MaterialMesh2dBundle, transform::TransformSystem};
 
 // Colors
 const PARTICLE_AMPLITUDE: f32 = 50.;
 const PARTICLE_COLOR: Color = Color::GREEN;
 const PARTICLE_RADIUS: f32 = 5.;
 const PARTICLE_SIZE: Vec3 = Vec2::splat(PARTICLE_RADIUS).extend(1.0);
-const PARTICLE_SPEED: f32 = -100.;
-const PARTICLE_FREQUENCY: f32 = 0.5;
+const PARTICLE_SPEED: f32 = -200.;
+const PARTICLE_FREQUENCY: f32 = 2.;
 
 const TRANSMITTER_COLOR: Color = Color::ORANGE;
 const TRANSMITTER_SIZE: f32 = 25.;
@@ -17,14 +17,14 @@ const RECEIVER_COLOR: Color = Color::RED;
 const RECEIVER_WIDTH: f32 = 2. * PARTICLE_AMPLITUDE + 2. * PARTICLE_RADIUS;
 const RECEIVER_HEIGHT: f32 = 2. * RECEIVER_WIDTH;
 const RECEIVER_SIZE: Vec2 = Vec2::new(RECEIVER_HEIGHT, RECEIVER_WIDTH);
-const RECEIVER_TIME_SCALE: f32 = 1.0 / PARTICLE_FREQUENCY;
+const RECEIVER_TIME_SCALE: f32 = 2. * 1.0 / PARTICLE_FREQUENCY;
 const RECEIVER_DELTA_X_PER_SECOND: f32 = 2. * RECEIVER_WIDTH / RECEIVER_TIME_SCALE;
 const RECEIVER_PLOT_COLOR: Color = Color::BLACK;
-const RECEIVER_PLOT_RADIUS: f32 = 10.;
+const RECEIVER_PLOT_RADIUS: f32 = 7.;
 const RECEIVER_PLOT_SIZE: Vec3 = Vec2::splat(RECEIVER_PLOT_RADIUS).extend(1.0);
 const RECEIVER_SPEED: f32 = 100.;
 
-const PARTICLE_SPAWN_RATE_MS: u64 = 50;
+const PARTICLE_SPAWN_RATE_MS: u64 = 10;
 
 #[derive(Component, Default)]
 struct Receiver {
@@ -32,8 +32,14 @@ struct Receiver {
     current_draw_position: f32,
 }
 
+enum Movement {
+    Left,
+    Right,
+    Stationary,
+}
+
 #[derive(Component)]
-struct Mover;
+struct Mover(Movement);
 
 #[derive(Component, Default)]
 struct Transmitter {
@@ -57,12 +63,15 @@ fn main() {
             (
                 propagate_particle,
                 produce_particle,
-                destroy_particle,
-                handle_rx_collision,
                 move_rx,
                 reset_simulation,
             )
                 .chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            (handle_rx_collision, destroy_particle).after(TransformSystem::TransformPropagate), // Need
+                                                                                                // to wait til bevy propagates the transform before using the global transform
         )
         .run();
 }
@@ -139,8 +148,8 @@ fn handle_rx_collision(
         for (rx_entity, rx_transform, mut rx) in rx_query.iter_mut() {
             let rx_translation = rx_transform.translation;
             let rx_right_bound = rx_translation.x + RECEIVER_WIDTH;
-            let rx_top_bound = rx_translation.y + RECEIVER_HEIGHT / 2.;
-            let rx_bottom_bound = rx_translation.y - RECEIVER_HEIGHT / 2.;
+            let rx_top_bound = rx_translation.y + RECEIVER_HEIGHT / 4.;
+            let rx_bottom_bound = rx_translation.y - RECEIVER_HEIGHT / 4.;
 
             if particle_pos.y < rx_top_bound
                 && particle_pos.y > rx_bottom_bound
@@ -210,9 +219,14 @@ fn destroy_particle(
     }
 }
 
-fn move_rx(mut rx_query: Query<&mut Transform, (With<Receiver>, With<Mover>)>, time: Res<Time>) {
-    for mut transform in rx_query.iter_mut() {
-        transform.translation.x += RECEIVER_SPEED * time.delta_seconds();
+fn move_rx(mut rx_query: Query<(&mut Transform, &Mover), With<Receiver>>, time: Res<Time>) {
+    for (mut transform, movement) in rx_query.iter_mut() {
+        let direction = match movement.0 {
+            Movement::Left => -1.,
+            Movement::Right => 1.0,
+            Movement::Stationary => 0.,
+        };
+        transform.translation.x += direction * RECEIVER_SPEED * time.delta_seconds();
     }
 }
 
@@ -221,8 +235,46 @@ fn start_simulation(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
 ) {
+    let start_x = -300.;
+    let y_pos = 200.;
+
+    create_simulation(
+        &mut meshes,
+        &mut materials,
+        &mut commands,
+        start_x,
+        y_pos,
+        Movement::Stationary,
+    );
+
+    create_simulation(
+        &mut meshes,
+        &mut materials,
+        &mut commands,
+        start_x,
+        0.,
+        Movement::Right,
+    );
+
+    create_simulation(
+        &mut meshes,
+        &mut materials,
+        &mut commands,
+        100.,
+        -y_pos,
+        Movement::Left,
+    );
+}
+
+fn create_simulation(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    commands: &mut Commands,
+    rx_start_x: f32,
+    y_pos: f32,
+    movement: Movement,
+) {
     let transmitter_x = 400.;
-    let transmitter_y = 200.;
     let half_tri_size = TRANSMITTER_SIZE / 2.;
     let pta = Vec2::new(half_tri_size, half_tri_size);
     let ptb = Vec2::new(0., -half_tri_size);
@@ -238,48 +290,22 @@ fn start_simulation(
         MaterialMesh2dBundle {
             mesh: meshes.add(Triangle2d::new(pta, ptb, ptc)).into(),
             material: materials.add(TRANSMITTER_COLOR),
-            transform: Transform::from_xyz(transmitter_x, transmitter_y, 1.),
+            transform: Transform::from_xyz(transmitter_x, y_pos, 1.),
             ..default()
         },
     ));
 
-    commands.spawn((
-        Transmitter {
-            spawn_rate: Timer::new(
-                Duration::from_millis(PARTICLE_SPAWN_RATE_MS),
-                TimerMode::Repeating,
-            ),
-            ..Default::default()
-        },
-        MaterialMesh2dBundle {
-            mesh: meshes.add(Triangle2d::new(pta, ptb, ptc)).into(),
-            material: materials.add(TRANSMITTER_COLOR),
-            transform: Transform::from_xyz(transmitter_x, -transmitter_y, 1.),
-            ..default()
-        },
-    ));
-
-    let start_x = -300.;
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: meshes.add(Rectangle::from_size(RECEIVER_SIZE)).into(),
-            material: materials.add(RECEIVER_COLOR),
-            transform: Transform::from_xyz(start_x, transmitter_y, 1.),
-            ..default()
-        },
-        Receiver::default(),
-    ));
-
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: meshes.add(Rectangle::from_size(RECEIVER_SIZE)).into(),
-            material: materials.add(RECEIVER_COLOR),
-            transform: Transform::from_xyz(start_x, -transmitter_y, 1.),
-            ..default()
-        },
-        Receiver::default(),
-        Mover,
-    ));
+    let mb = MaterialMesh2dBundle {
+        mesh: meshes.add(Rectangle::from_size(RECEIVER_SIZE)).into(),
+        material: materials.add(RECEIVER_COLOR),
+        transform: Transform::from_xyz(rx_start_x, y_pos, 1.),
+        ..default()
+    };
+    match movement {
+        Movement::Left => commands.spawn((mb, Receiver::default(), Mover(Movement::Left))),
+        Movement::Right => commands.spawn((mb, Receiver::default(), Mover(Movement::Right))),
+        Movement::Stationary => commands.spawn((mb, Receiver::default())),
+    };
 }
 
 fn reset_simulation(
