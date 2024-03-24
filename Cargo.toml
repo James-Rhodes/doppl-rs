@@ -3,6 +3,9 @@ name = "doppl-rs"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+webdev = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 # Enable a small amount of optimization in debug mode
 [profile.dev]
@@ -12,5 +15,11 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+[profile.webdev]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+
 [dependencies]
-bevy = { version = "0.13.0", features = ["dynamic_linking"] }
+bevy = { version = "0.13.0" }
