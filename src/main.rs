@@ -140,22 +140,24 @@ fn setup(
     materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
 ) {
-    commands.spawn((
-        TextBundle::from_section(
-            "Press 'r' to restart the simulation",
-            TextStyle {
-                font_size: 20.,
+    if !cfg!(feature = "webdev") {
+        commands.spawn((
+            TextBundle::from_section(
+                "Press 'r' to restart the simulation",
+                TextStyle {
+                    font_size: 20.,
+                    ..default()
+                },
+            )
+            .with_style(Style {
+                position_type: PositionType::Absolute,
+                top: Val::Px(15.0),
+                left: Val::Px(15.),
                 ..default()
-            },
-        )
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            top: Val::Px(15.0),
-            left: Val::Px(15.),
-            ..default()
-        }),
-        HIGH_RES_LAYERS,
-    ));
+            }),
+            HIGH_RES_LAYERS,
+        ));
+    }
 
     commands.insert_resource(ResetTimer {
         timer: Timer::new(Duration::from_secs(10), TimerMode::Repeating),
