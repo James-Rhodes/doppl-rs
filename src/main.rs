@@ -7,11 +7,11 @@ use bevy::{
         render_resource::{
             Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
         },
-        view::RenderLayers,
+        view::{screenshot::ScreenshotManager, RenderLayers},
     },
     sprite::MaterialMesh2dBundle,
     transform::TransformSystem,
-    window::WindowResized,
+    window::{PrimaryWindow, WindowResized},
 };
 
 // Colors
@@ -124,6 +124,7 @@ fn main() {
                 reset_simulation,
                 reset_simulation_timer,
                 fit_canvas,
+                screenshot_window,
             )
                 .chain(),
         )
@@ -140,7 +141,7 @@ fn setup(
     materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
 ) {
-    if !cfg!(feature = "webdev") {
+    if !cfg!(feature = "webdev") && !cfg!(feature = "gifcreate") {
         commands.spawn((
             TextBundle::from_section(
                 "Press 'r' to restart the simulation",
@@ -494,5 +495,27 @@ fn fit_canvas(
         let v_scale = event.height / RES_HEIGHT as f32;
         let mut projection = projections.single_mut();
         projection.scale = 1. / h_scale.min(v_scale);
+    }
+}
+
+fn screenshot_window(
+    input: Res<ButtonInput<KeyCode>>,
+    main_window: Query<Entity, With<PrimaryWindow>>,
+    mut screenshot_manager: ResMut<ScreenshotManager>,
+    mut counter: Local<u32>,
+    mut start_screenshot: Local<bool>,
+) {
+    if cfg!(feature = "gifcreate") {
+        let path = format!("./screenshots/screenshot-{num:0>3}.png", num = *counter);
+        if input.just_pressed(KeyCode::Space) {
+            *start_screenshot = true;
+        }
+
+        if *counter < 500 && *start_screenshot {
+            *counter += 1;
+            screenshot_manager
+                .save_screenshot_to_disk(main_window.single(), path)
+                .unwrap();
+        }
     }
 }

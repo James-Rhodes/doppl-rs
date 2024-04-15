@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 webdev = []
+gifcreate = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 # Enable a small amount of optimization in debug mode
@@ -20,6 +21,9 @@ inherits = "release"
 opt-level = 'z'
 lto = true
 codegen-units = 1
+
+[profile.gifcreate]
+inherits = "release"
 
 [dependencies]
 bevy = { version = "0.13.0" }

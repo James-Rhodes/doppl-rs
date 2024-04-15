@@ -19,3 +19,5 @@ please do tell me.
 Ps. This was my first time using Bevy so there are probably lots of small things
 wrong with this code, but it does indeed work.
 
+Note: By hitting spacebar with the gifcreate feature enabled, 500 png's will be
+saved in ./screenshots The png's can be rendered to a gif using:
